@@ -4,6 +4,8 @@
 #include <zstd.h>
 #include "../parsers/YSMParser.hpp"
 #include <array>
+#include <limits>
+#include <span>
 #include <string>
 #include "YsmZstd.hpp"
 
@@ -71,7 +73,7 @@ std::vector<uint8_t> ModifiedChaChaEncrypt(const std::vector<uint8_t>& data, con
 	return result;
 }
 
-std::vector<uint8_t> ModifiedChaChaDecrypt(const std::vector<uint8_t>& data, const uint8_t* key, const uint8_t* iv, const uint64_t seed) {
+std::vector<uint8_t> ModifiedChaChaDecrypt(std::span<const uint8_t> data, const uint8_t* key, const uint8_t* iv, const uint64_t seed) {
 	std::vector<uint8_t> key_iv(56);
 	std::memcpy(key_iv.data(), key, 32);
 	std::memcpy(key_iv.data() + 32, iv, 24);
@@ -85,31 +87,32 @@ std::vector<uint8_t> ModifiedChaChaDecrypt(const std::vector<uint8_t>& data, con
 	ctx.rounds = 10 * (hash2 % 3) + 10;
 	xchacha_keysetup(&ctx, key, iv);
 
-	std::vector<uint8_t> result;
-	result.reserve(data.size());
+	std::vector<uint8_t> result(data.size());
 
 	while (blockPointer < data.size()) {
 		if (blockPointer + next_round_size > data.size()) {
 			next_round_size = data.size() - blockPointer;
 		}
 
-		std::vector<uint8_t> enc1(data.begin() + blockPointer, data.begin() + blockPointer + next_round_size);
+		const uint8_t* enc1 = data.data() + blockPointer;
+		uint8_t* dec1 = result.data() + blockPointer;
 		blockPointer += next_round_size;
 
-		std::vector<uint8_t> dec1(next_round_size);
-		xchacha_decrypt_bytes(&ctx, enc1.data(), dec1.data(), (uint32_t)next_round_size);
+		xchacha_decrypt_bytes(&ctx, enc1, dec1, (uint32_t)next_round_size);
 
-		uint64_t res_hash = CityHash64WithSeed(reinterpret_cast<const char*>(dec1.data()), next_round_size, seed);
+		uint64_t res_hash = CityHash64WithSeed(reinterpret_cast<const char*>(dec1), next_round_size, seed);
 
 		next_round_size = xchacha_update_state(&ctx, res_hash);
-
-		result.insert(result.end(), dec1.begin(), dec1.end());
 	}
 
 	return result;
 }
 
-std::vector<uint8_t> MT19937Xor_Decrypt(const std::vector<uint8_t>& data, const uint8_t* key, const uint8_t* iv) {
+std::vector<uint8_t> ModifiedChaChaDecrypt(const std::vector<uint8_t>& data, const uint8_t* key, const uint8_t* iv, const uint64_t seed) {
+	return ModifiedChaChaDecrypt(std::span<const uint8_t>(data.data(), data.size()), key, iv, seed);
+}
+
+void MT19937XorInPlace(std::span<uint8_t> data, const uint8_t* key, const uint8_t* iv) {
 	std::vector<uint8_t> key_iv(56);
 	std::memcpy(key_iv.data(), key, 32);
 	std::memcpy(key_iv.data() + 32, iv, 24);
@@ -117,29 +120,58 @@ std::vector<uint8_t> MT19937Xor_Decrypt(const std::vector<uint8_t>& data, const 
 	uint64_t seed = CityHash64WithSeed(reinterpret_cast<const char*>(key_iv.data()), key_iv.size(), SEED_KEY_DERIVATION);
 
 	std::mt19937_64 mt(seed);
-	std::vector<uint8_t> result(data.size());
 
 	size_t i = 0;
 	while (i < data.size()) {
 		uint64_t rnd = mt();
 		for (int j = 0; j < 8 && i < data.size(); ++j) {
 			uint8_t keystream_byte = static_cast<uint8_t>((rnd >> (j * 8)) & 0xFF);
-			result[i] = data[i] ^ keystream_byte;
+			data[i] ^= keystream_byte;
 			++i;
 		}
 	}
+}
+
+std::vector<uint8_t> MT19937Xor_Decrypt(const std::vector<uint8_t>& data, const uint8_t* key, const uint8_t* iv) {
+	std::vector<uint8_t> result = data;
+	MT19937XorInPlace(std::span<uint8_t>(result.data(), result.size()), key, iv);
 
 	return result;
 }
 
-std::vector<uint8_t> DecompressZstd(const std::vector<uint8_t>& compressed_data) {
+std::vector<uint8_t> DecompressZstd(std::span<const uint8_t> compressed_data) {
 	auto washed_data = YsmZstd::wash(compressed_data);
+	unsigned long long const known_size = ZSTD_getFrameContentSize(washed_data.data(), washed_data.size());
+	if (known_size == ZSTD_CONTENTSIZE_ERROR) {
+		throw std::runtime_error("ZSTD decompression failed: invalid frame content size");
+	}
+	if (known_size != ZSTD_CONTENTSIZE_UNKNOWN) {
+		if (known_size > static_cast<unsigned long long>(std::numeric_limits<std::size_t>::max())) {
+			throw std::runtime_error("ZSTD decompression failed: output is too large");
+		}
+		std::vector<uint8_t> decompressed_data(static_cast<std::size_t>(known_size));
+		size_t const ret = ZSTD_decompress(
+			decompressed_data.data(),
+			decompressed_data.size(),
+			washed_data.data(),
+			washed_data.size()
+		);
+		if (ZSTD_isError(ret)) {
+			throw std::runtime_error(std::string("ZSTD decompression failed: ") + ZSTD_getErrorName(ret));
+		}
+		decompressed_data.resize(ret);
+		return decompressed_data;
+	}
+
 	ZSTD_DCtx* dctx = ZSTD_createDCtx();
 	if (dctx == nullptr) {
 		throw std::runtime_error("Failed to create ZSTD decompression context!");
 	}
 
 	std::vector<uint8_t> decompressed_data;
+	if (washed_data.size() <= std::numeric_limits<std::size_t>::max() / 3) {
+		decompressed_data.reserve(washed_data.size() * 3);
+	}
 
 	ZSTD_inBuffer input = { washed_data.data(), washed_data.size(), 0 };
 
@@ -162,6 +194,10 @@ std::vector<uint8_t> DecompressZstd(const std::vector<uint8_t>& compressed_data)
 	ZSTD_freeDCtx(dctx);
 
 	return decompressed_data;
+}
+
+std::vector<uint8_t> DecompressZstd(const std::vector<uint8_t>& compressed_data) {
+	return DecompressZstd(std::span<const uint8_t>(compressed_data.data(), compressed_data.size()));
 }
 
 std::vector<uint8_t> CompressZstd(const std::vector<uint8_t>& data, int level) {

@@ -108,6 +108,42 @@ std::string format_seconds(double seconds) {
     return oss.str();
 }
 
+std::string escape_profile_field(const std::string& value) {
+    std::string escaped;
+    escaped.reserve(value.size());
+    for (char ch : value) {
+        switch (ch) {
+        case '\\':
+            escaped += "\\\\";
+            break;
+        case '\t':
+            escaped += "\\t";
+            break;
+        case '\n':
+            escaped += "\\n";
+            break;
+        case '\r':
+            escaped += "\\r";
+            break;
+        default:
+            escaped.push_back(ch);
+            break;
+        }
+    }
+    return escaped;
+}
+
+void emit_profile_line(const std::string& file_name, int version, const std::string& stage, double milliseconds) {
+    std::ostringstream ms;
+    ms << std::fixed << std::setprecision(3) << milliseconds;
+    std::cerr << "YSM_PROFILE"
+        << "\tfile=" << escape_profile_field(file_name)
+        << "\tversion=" << version
+        << "\tstage=" << escape_profile_field(stage)
+        << "\tms=" << ms.str()
+        << '\n';
+}
+
 std::string make_relative_utf8(const fs::path& path, const fs::path& base) {
     std::error_code ec;
     const fs::path relative_path = fs::relative(path, base, ec);
@@ -477,6 +513,12 @@ int main(int argc, char** argv) {
                  PlatformCompat::enable_virtual_terminal(stderr);
 
     CLI::App app{ "YSM File Decryptor" };
+    // On Windows, argv from main() is encoded in the system ANSI code page,
+    // so paths containing characters outside that code page (common with
+    // CJK usernames in the Tauri sidecar's temp dir) get mangled before
+    // std::filesystem ever sees them. ensure_utf8 re-reads the original
+    // UTF-16 command line via GetCommandLineW and re-encodes as UTF-8.
+    argv = app.ensure_utf8(argv);
     app.set_version_flag("--version", YSM_PARSER_VERSION, "Show version information and exit.");
 
     std::string input_dir_path;
@@ -484,6 +526,7 @@ int main(int argc, char** argv) {
     bool verbose = false;
     bool debug = false;
     bool formatJson = false;
+    bool profile = false;
     unsigned int requested_threads = 0;
 
     app.add_option("-i,--input", input_dir_path, "Path to the input directory.")
@@ -493,6 +536,7 @@ int main(int argc, char** argv) {
     app.add_flag("-v,--verbose", verbose, "Show detailed per-file banners and parser logs.");
     app.add_flag("-d,--debug", debug, "Export all binary products (Only for V3).");
     app.add_flag("-f,--format", formatJson, "Format all json (Only for V3).");
+    app.add_flag("--profile", profile, "Emit machine-readable per-file timing lines to stderr.");
     app.add_option("-j,--threads", requested_threads, "Number of files to process in parallel. 0 = auto.");
 
 #if YSM_WASM_TARGET
@@ -574,15 +618,17 @@ int main(int argc, char** argv) {
                 std::cout << theme.dim() << "[ YSMParser ] Preparing parser..." << theme.reset() << '\n';
             }
 
+            std::unique_ptr<YSMParser> parser;
             try {
                 if (!fs::exists(task.target_output_dir)) {
                     fs::create_directories(task.target_output_dir);
                 }
 
-                auto parser = YSMParserFactory::Create(utf8_input);
+                parser = YSMParserFactory::Create(utf8_input);
                 parser->setVerbose(verbose);
                 parser->setDebug(debug);
-				parser->setFormatJson(formatJson);
+                parser->setFormatJson(formatJson);
+                parser->setProfile(profile);
                 const int version = parser->getYSGPVersion();
 
                 if (verbose) {
@@ -591,20 +637,51 @@ int main(int argc, char** argv) {
                     std::cout << theme.dim() << "[ YSMParser ] Parsing payload..." << theme.reset() << '\n';
                 }
 
+                auto stage_start = std::chrono::steady_clock::now();
                 parser->parse();
+                const double parse_ms = std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - stage_start
+                ).count();
+                if (profile) {
+                    emit_profile_line(result.file_name, version, "parse_total", parse_ms);
+                    for (const auto& entry : parser->profileEntries()) {
+                        emit_profile_line(result.file_name, version, entry.stage, entry.milliseconds);
+                    }
+                }
 
                 if (verbose) {
                     std::cout << theme.dim() << "[ YSMParser ] Exporting resources..." << theme.reset() << '\n';
                 }
+                stage_start = std::chrono::steady_clock::now();
                 parser->saveToDirectory(result.output_dir);
+                const double export_ms = std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - stage_start
+                ).count();
+                if (profile) {
+                    emit_profile_line(result.file_name, version, "export", export_ms);
+                }
 
                 result.success = true;
             }
             catch (const std::exception& e) {
                 result.error_message = e.what();
+                if (debug && parser) {
+                    try {
+                        parser->saveToDirectory(result.output_dir);
+                    }
+                    catch (...) {
+                    }
+                }
             }
             catch (...) {
                 result.error_message = "Caught an unknown or cross-boundary exception.";
+                if (debug && parser) {
+                    try {
+                        parser->saveToDirectory(result.output_dir);
+                    }
+                    catch (...) {
+                    }
+                }
             }
 
             result.elapsed_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - file_start).count();

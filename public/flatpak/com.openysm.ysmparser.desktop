@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=YSMParser
+Comment=.ysm model file decryptor and exporter
+Exec=ysm-parser
+Icon=com.openysm.ysmparser
+Type=Application
+Categories=Utility;Graphics;
+Terminal=false
+StartupNotify=true

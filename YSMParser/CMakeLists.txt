@@ -33,12 +33,24 @@ if (YSM_TARGET_WASM)
     "-fexceptions"
   )
 
+  if (YSM_WASM_SIMD)
+    target_compile_options(YSMParser PRIVATE
+      "-msimd128"
+    )
+  endif()
+
   target_link_options(YSMParser PRIVATE
     "-fexceptions"
     "-sFORCE_FILESYSTEM=1"
     "-sALLOW_MEMORY_GROWTH=1"
     "-sEXIT_RUNTIME=0"
   )
+
+  if (YSM_WASM_SIMD)
+    target_link_options(YSMParser PRIVATE
+      "-msimd128"
+    )
+  endif()
 
   if (YSM_WASM_ENV STREQUAL "node")
     target_link_options(YSMParser PRIVATE

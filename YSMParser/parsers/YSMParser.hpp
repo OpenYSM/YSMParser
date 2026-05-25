@@ -4,6 +4,11 @@
 #include <vector>
 #include <filesystem>
 
+struct YSMProfileEntry {
+	std::string stage;
+	double milliseconds = 0.0;
+};
+
 class YSMParser {
 public:
 	// Disable copy and move semantics
@@ -15,15 +20,26 @@ public:
 	void setVerbose(bool verbose) { m_verbose = verbose; }
 	void setDebug(bool debug) { m_debug = debug; }
 	void setFormatJson(bool formatJson) { m_formatJson = formatJson; }
+	void setProfile(bool profile) { m_profile = profile; }
+	const std::vector<YSMProfileEntry>& profileEntries() const { return m_profileEntries; }
 	virtual ~YSMParser() = default;
 protected:
 	bool isVerbose() const { return m_verbose; }
 	bool isDebug() const { return m_debug; }
 	bool isFormatJson() const { return m_formatJson; }
+	bool isProfile() const { return m_profile; }
+	void clearProfileEntries() { m_profileEntries.clear(); }
+	void recordProfileStage(const std::string& stage, double milliseconds) {
+		if (m_profile) {
+			m_profileEntries.push_back({ stage, milliseconds });
+		}
+	}
 private:
 	bool m_verbose = false;
 	bool m_debug = false;
 	bool m_formatJson = false;
+	bool m_profile = false;
+	std::vector<YSMProfileEntry> m_profileEntries;
 };
 
 namespace YSMParserFactory {

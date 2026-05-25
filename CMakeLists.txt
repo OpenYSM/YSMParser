@@ -14,6 +14,7 @@ string(STRIP "${YSM_PARSER_VERSION_RAW}" YSM_PARSER_VERSION)
 project("YSMParser" VERSION ${YSM_PARSER_VERSION})
 
 option(YSM_TARGET_WASM "Build a WebAssembly/Node.js target with Emscripten" OFF)
+option(YSM_WASM_SIMD "Enable WebAssembly SIMD code generation" OFF)
 set(YSM_WASM_ENV "node" CACHE STRING "Emscripten runtime environment (node or web)")
 set_property(CACHE YSM_WASM_ENV PROPERTY STRINGS node web)
 

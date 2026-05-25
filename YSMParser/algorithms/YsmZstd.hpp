@@ -1,6 +1,7 @@
 #include <vector>
 #include <cstdint>
 #include <stdexcept>
+#include <span>
 
 class YsmZstd {
 private:
@@ -40,13 +41,13 @@ public:
     /**
      * 洗白操作：将 YSM 魔改的 ZSTD 恢复为标准格式
      */
-    static std::vector<uint8_t> wash(const std::vector<uint8_t>& compressed_data) {
+    static std::vector<uint8_t> wash(std::span<const uint8_t> compressed_data) {
         if (compressed_data.size() < 5) {
             throw std::invalid_argument("Invalid data length");
         }
 
         // 拷贝一份数据用于原地修改并返回
-        std::vector<uint8_t> data = compressed_data;
+        std::vector<uint8_t> data(compressed_data.begin(), compressed_data.end());
 
         // 1. 验证 ZSTD Magic Number (0xFD2FB528) - 小端读取
         uint32_t magic = data[0] | (data[1] << 8) | (data[2] << 16) | (data[3] << 24);
@@ -102,6 +103,10 @@ public:
         }
 
         return data;
+    }
+
+    static std::vector<uint8_t> wash(const std::vector<uint8_t>& compressed_data) {
+        return wash(std::span<const uint8_t>(compressed_data.data(), compressed_data.size()));
     }
 
     /**

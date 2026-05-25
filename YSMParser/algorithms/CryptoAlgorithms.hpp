@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <span>
 #include <vector>
 #include <string>
 #include <utility>
@@ -17,11 +18,17 @@ namespace CryptoUtils {
 
 size_t xchacha_update_state(XChaCha_ctx* ctx, uint64_t hash_v);
 
+std::vector<uint8_t> ModifiedChaChaDecrypt(std::span<const uint8_t> data, const uint8_t* key, const uint8_t* iv, uint64_t seed);
+
 std::vector<uint8_t> ModifiedChaChaDecrypt(const std::vector<uint8_t>& data, const uint8_t* key, const uint8_t* iv, uint64_t seed);
 
 std::vector<uint8_t> ModifiedChaChaEncrypt(const std::vector<uint8_t>& data, const uint8_t* key, const uint8_t* iv, const uint64_t seed);
 
+void MT19937XorInPlace(std::span<uint8_t> data, const uint8_t* key, const uint8_t* iv);
+
 std::vector<uint8_t> MT19937Xor_Decrypt(const std::vector<uint8_t>& data, const uint8_t* key, const uint8_t* iv);
+
+std::vector<uint8_t> DecompressZstd(std::span<const uint8_t> compressed_data);
 
 std::vector<uint8_t> DecompressZstd(const std::vector<uint8_t>& compressed_data);
 

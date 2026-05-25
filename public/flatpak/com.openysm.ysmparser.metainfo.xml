@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component type="desktop-application">
+    <id>com.openysm.ysmparser</id>
+    <metadata_license>CC0-1.0</metadata_license>
+    <project_license>LGPL-3.0-or-later</project_license>
+    <name>YSMParser</name>
+    <summary>.ysm model file decryptor and exporter</summary>
+    <description>
+        <p>
+      A desktop tool to parse, decrypt, and export .ysm model files
+      (Minecraft: Java Edition Blockbench model format).
+      Supports V1, V2, and V3 file formats.
+        </p>
+    </description>
+    <url type="homepage">https://github.com/OpenYSM/YSMParser</url>
+    <url type="bugtracker">https://github.com/OpenYSM/YSMParser/issues</url>
+    <categories>
+        <category>Utility</category>
+        <category>Graphics</category>
+    </categories>
+    <releases>
+        <release version="0.3.5" date="2025-01-01"/>
+    </releases>
+    <content_rating type="oars-1.1"/>
+</component>

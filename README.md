@@ -143,6 +143,24 @@ WASM构建需要EMSDK环境变量指向Emscripten安装目录。
 | `json` |
 | `CLI11` |
 
+### 新前端构建（/public）
+
+```bash
+# 安装依赖
+cd public && pnpm install
+
+# 网页端（静态文件）
+pnpm build
+# 构建输出在 public/dist/，将 YSMParser.js 和 YSMParser.wasm (wasm-web-release 构建产物) 一起放入即可使用
+
+# Tauri 桌面应用（开发模式）
+pnpm tauri dev
+
+# Tauri 桌面应用（发行构建）
+# 先将 YSMParser 可执行文件放入 public/src-tauri/binaries/YSMParser-<target-triple>
+pnpm tauri build
+```
+
 <a id="english"></a>
 
 ## English
@@ -269,3 +287,22 @@ All dependencies are vendored in source form under `external`.
 | `fpng` |
 | `json` |
 | `CLI11` |
+
+### New Frontend Build (/public)
+
+```bash
+# Install dependencies
+cd public && pnpm install
+
+# Web service (static files)
+pnpm build
+# Output is in public/dist/ — place YSMParser.js and YSMParser.wasm
+# (from the wasm-web-release build) alongside it before serving
+
+# Tauri desktop app (development)
+pnpm tauri dev
+
+# Tauri desktop app (release build)
+# First copy the YSMParser binary to public/src-tauri/binaries/YSMParser-<target-triple>
+pnpm tauri build
+```

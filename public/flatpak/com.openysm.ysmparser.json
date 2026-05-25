@@ -1,0 +1,74 @@
+{
+  "id": "com.openysm.ysmparser",
+  "runtime": "org.gnome.Platform",
+  "runtime-version": "47",
+  "sdk": "org.gnome.Sdk",
+  "sdk-extensions": [
+    "org.freedesktop.Sdk.Extension.rust-stable",
+    "org.freedesktop.Sdk.Extension.node22"
+  ],
+  "command": "ysm-parser",
+  "finish-args": [
+    "--share=ipc",
+    "--share=network",
+    "--socket=x11",
+    "--socket=wayland",
+    "--device=dri",
+    "--env=WEBKIT_DISABLE_DMABUF_RENDERER=1",
+    "--env=WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1",
+    "--env=WEBKIT_FORCE_SANDBOX=0",
+    "--filesystem=host",
+    "--talk-name=org.freedesktop.FileManager1"
+  ],
+  "build-options": {
+    "append-path": "/usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/node22/bin",
+    "build-args": [ "--share=network" ],
+    "env": {
+      "CARGO_HOME": "/run/build/ysm-parser/cargo-home",
+      "CI": "true",
+      "RUST_BACKTRACE": "1"
+    }
+  },
+  "modules": [
+    {
+      "name": "ysm-parser",
+      "buildsystem": "simple",
+      "build-commands": [
+        "npm install -g pnpm --prefix /run/build/ysm-parser/.npm-global",
+        "",
+        "# ---- Build C++ sidecar (YSMParser CLI) ----",
+        "cmake -S . -B build-cpp -G Ninja -DCMAKE_BUILD_TYPE=Release -DYSM_TARGET_JNI=OFF",
+        "cmake --build build-cpp --parallel",
+        "",
+        "# Install sidecar binary into Tauri's expected path",
+        "mkdir -p public/src-tauri/binaries",
+        "cp build-cpp/YSMParser/YSMParser public/src-tauri/binaries/YSMParser-x86_64-unknown-linux-gnu",
+        "chmod +x public/src-tauri/binaries/YSMParser-x86_64-unknown-linux-gnu",
+        "",
+        "# ---- Install frontend dependencies ----",
+        "export PATH=\"/run/build/ysm-parser/.npm-global/bin:$PATH\" && cd public && mkdir -p \"$PWD/.home\" && HOME=\"$PWD/.home\" && pnpm install --frozen-lockfile && cd ..",
+        "",
+        "# ---- Build Tauri shell ----",
+        "export PATH=\"/run/build/ysm-parser/.npm-global/bin:$PATH\" && cd public && pnpm tauri build --no-bundle && cd ..",
+        "",
+        "# ---- Install to /app ----",
+        "install -Dm755 public/src-tauri/target/release/ysm-parser /app/bin/ysm-parser-bin",
+        "install -Dm755 public/src-tauri/target/release/YSMParser /app/bin/YSMParser",
+        "printf '%s\\n' '#!/usr/bin/env sh' 'export WEBKIT_DISABLE_DMABUF_RENDERER=1' 'export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1' 'export WEBKIT_FORCE_SANDBOX=0' 'exec /app/bin/ysm-parser-bin \"$@\"' > /app/bin/ysm-parser",
+        "chmod +x /app/bin/ysm-parser",
+        "install -Dm644 public/flatpak/com.openysm.ysmparser.desktop /app/share/applications/com.openysm.ysmparser.desktop",
+        "install -Dm644 public/flatpak/com.openysm.ysmparser.metainfo.xml /app/share/metainfo/com.openysm.ysmparser.metainfo.xml",
+        "install -Dm644 public/src-tauri/icons/32x32.png /app/share/icons/hicolor/32x32/apps/com.openysm.ysmparser.png",
+        "install -Dm644 public/src-tauri/icons/64x64.png /app/share/icons/hicolor/64x64/apps/com.openysm.ysmparser.png",
+        "install -Dm644 public/src-tauri/icons/128x128.png /app/share/icons/hicolor/128x128/apps/com.openysm.ysmparser.png",
+        "install -Dm644 public/src-tauri/icons/icon.png /app/share/icons/hicolor/256x256/apps/com.openysm.ysmparser.png"
+      ],
+      "sources": [
+        {
+          "type": "dir",
+          "path": "../.."
+        }
+      ]
+    }
+  ]
+}

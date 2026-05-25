@@ -52,6 +52,11 @@ static uint32 UNALIGNED_LOAD32(const char *p) {
 #define bswap_32(x) _byteswap_ulong(x)
 #define bswap_64(x) _byteswap_uint64(x)
 
+#elif defined(_WIN32)
+
+#define bswap_32(x) __builtin_bswap32(x)
+#define bswap_64(x) __builtin_bswap64(x)
+
 #elif defined(__APPLE__)
 
 // Mac OS X / Darwin features

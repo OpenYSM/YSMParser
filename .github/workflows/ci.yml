@@ -1,0 +1,179 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  flake:
+    name: Nix flake
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: DeterminateSystems/determinate-nix-action@v3
+
+      - name: Evaluate flake
+        run: nix flake check --no-build
+
+  native:
+    name: Native C++
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: DeterminateSystems/determinate-nix-action@v3
+
+      - name: Configure and build
+        run: |
+          nix develop .#native --command bash -c '
+            set -euo pipefail
+            cmake --preset linux-release
+            cmake --build --preset linux-release --parallel
+            cmake --install out/build/linux-release --prefix out/install/linux-release
+          '
+
+      - name: Upload native artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ysmparser-linux-native
+          path: out/install/linux-release/
+          if-no-files-found: error
+
+  web:
+    name: Browser WASM
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: DeterminateSystems/determinate-nix-action@v3
+
+      - name: Build browser app
+        run: nix develop .#wasm --command bash public/scripts/build-web.sh
+
+      - name: Upload web artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ysmparser-web
+          path: public/dist/
+          if-no-files-found: error
+
+  tauri:
+    name: Tauri desktop
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: DeterminateSystems/determinate-nix-action@v3
+
+      - name: Build sidecar and Tauri shell
+        run: |
+          nix develop .#tauri --command bash -c '
+            set -euo pipefail
+            cmake -S . -B build-cpp -G Ninja -DCMAKE_BUILD_TYPE=Release -DYSM_TARGET_JNI=OFF
+            cmake --build build-cpp --parallel
+            mkdir -p public/src-tauri/binaries
+            cp build-cpp/YSMParser/YSMParser public/src-tauri/binaries/YSMParser-x86_64-unknown-linux-gnu
+            chmod +x public/src-tauri/binaries/YSMParser-x86_64-unknown-linux-gnu
+            cd public
+            pnpm install --frozen-lockfile
+            pnpm build
+            cargo build --manifest-path src-tauri/Cargo.toml --locked --release
+          '
+
+      - name: Upload Tauri artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ysmparser-tauri-linux
+          path: public/src-tauri/target/release/ysm-parser
+          if-no-files-found: error
+
+  tauri-windows-macos:
+    name: Tauri desktop (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Windows x64
+            os: windows-2022
+            msvc_arch: x64
+            sidecar_source: build-cpp/YSMParser/YSMParser.exe
+            sidecar_name: YSMParser-x86_64-pc-windows-msvc.exe
+            bundles: nsis
+            artifact_name: ysmparser-tauri-windows-x64
+          - label: macOS arm64
+            os: macos-14
+            sidecar_source: build-cpp/YSMParser/YSMParser
+            sidecar_name: YSMParser-aarch64-apple-darwin
+            bundles: dmg
+            artifact_name: ysmparser-tauri-macos-arm64
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: seanmiddleditch/gha-setup-ninja@v5
+
+      - name: Setup MSVC environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.msvc_arch }}
+
+      - name: Configure Rust MSVC linker
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $linker = Join-Path $env:VCToolsInstallDir 'bin\Hostx64\x64\link.exe'
+          if (-not (Test-Path $linker)) {
+            throw "MSVC linker not found: $linker"
+          }
+          "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=$linker" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Using Rust MSVC linker: $linker"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: public/pnpm-lock.yaml
+
+      - name: Build sidecar and Tauri bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B build-cpp -G Ninja -DCMAKE_BUILD_TYPE=Release -DYSM_TARGET_JNI=OFF
+          cmake --build build-cpp --parallel
+          mkdir -p public/src-tauri/binaries
+          cp "${{ matrix.sidecar_source }}" "public/src-tauri/binaries/${{ matrix.sidecar_name }}"
+          if [[ "${{ runner.os }}" != "Windows" ]]; then
+            chmod +x "public/src-tauri/binaries/${{ matrix.sidecar_name }}"
+          fi
+          cd public
+          pnpm install --frozen-lockfile
+          pnpm tauri build --bundles "${{ matrix.bundles }}"
+
+      - name: Upload Tauri bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            public/src-tauri/target/release/bundle/nsis/*.exe
+            public/src-tauri/target/release/bundle/dmg/*.dmg
+          if-no-files-found: error

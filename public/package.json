@@ -1,0 +1,27 @@
+{
+  "name": "ysm-parser-frontend",
+  "version": "0.3.5",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:web": "scripts/build-web.sh",
+    "bench:wasm-node": "node scripts/bench-wasm-node.mjs",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2",
+    "@tauri-apps/plugin-shell": "^2",
+    "jszip": "^3.10.1"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5",
+    "@tauri-apps/cli": "^2",
+    "svelte": "^5",
+    "typescript": "^5",
+    "vite": "^6"
+  }
+}

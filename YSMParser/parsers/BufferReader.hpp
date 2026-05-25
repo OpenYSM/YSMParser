@@ -29,6 +29,8 @@ struct BufferReader {
 	const uint8_t* data;
 	size_t size;
 	size_t offset = 0;
+	const char* context = nullptr;
+	void setContext(const char* value) { context = value; }
 	uint8_t seeByte() {
 		if (offset >= size)
 		{
@@ -99,12 +101,20 @@ struct BufferReader {
 	}
 
 	std::string readString() {
+		const size_t len_offset = offset;
 		uint32_t len = readVarint();
 
 		if (len == 0) return "";
 
 		if (offset + len > size) {
-			throw std::runtime_error("Buffer overflow while reading string");
+			const std::string contextText = context == nullptr ? "" : (" in " + std::string(context));
+			throw std::runtime_error(
+				"Buffer overflow while reading string" + contextText +
+				" at offset " + std::to_string(offset) +
+				", length_offset " + std::to_string(len_offset) +
+				", length " + std::to_string(len) +
+				", size " + std::to_string(size)
+			);
 		}
 
 		std::string s((const char*)&data[offset], len);
@@ -114,32 +124,27 @@ struct BufferReader {
 
 	std::vector<uint8_t> readByteSequence() {
 		uint32_t len = readVarint();
-		printf("len=%i\n", len);
-		if (offset + len > size) {
+		if (len > size - offset) {
 			throw ParserIndexOutOfBoundException();
 		}
 
 		if (len == 0) return {};
-		std::vector<uint8_t> s(len, 0);
-		std::copy(data + offset, data + offset + len, s.begin());
+		std::vector<uint8_t> s(len);
+		std::memcpy(s.data(), data + offset, len);
 		offset += len;
-
-		printf("Last element: 0x%02X\n", s.back());
 
 		return s;
 	}
 
 	std::vector<uint8_t> readBytesExactly(uint64_t len) {
-		if (offset + len > size) {
+		if (len > size - offset) {
 			throw ParserIndexOutOfBoundException();
 		}
 
 		if (len == 0) return {};
-		std::vector<uint8_t> s(len, 0);
-		std::copy(data + offset, data + offset + len, s.begin());
+		std::vector<uint8_t> s(static_cast<std::size_t>(len));
+		std::memcpy(s.data(), data + offset, static_cast<std::size_t>(len));
 		offset += len;
-
-		printf("Last element: 0x%02X\n", s.back());
 
 		return s;
 	}
