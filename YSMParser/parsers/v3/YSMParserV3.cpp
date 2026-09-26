@@ -2730,13 +2730,14 @@ void YSMParserV3::parse()
 		fpng::fpng_init();
 		});
 
-	// Parse Header
+	// Older V3 files carry a textual <format> header. Newer native V3 files
+	// store the format as the first uint32 of the decrypted payload.
 	try {
 		m_format = extractFormatFromHeader(header);
 	}
 	catch (const std::exception& e) {
-		std::cout << "Parse Failed: " << e.what() << std::endl;
-		throw ParserInvalidFileFormatException();
+		m_format = 0;
+		std::cout << "No textual format header; reading format from payload.\n";
 	}
 
 
@@ -2783,6 +2784,9 @@ void YSMParserV3::parse()
 
 
 	m_decompressed = CryptoUtils::DecompressZstd(m_decrypted);
+	if (m_format == 0 && m_decompressed.size() >= sizeof(uint32_t)) {
+		m_format = readLE<uint32_t>(reinterpret_cast<const char*>(m_decompressed.data()), 0);
+	}
 
 
 	// Start Parse Files
