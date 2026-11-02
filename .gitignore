@@ -364,3 +364,4 @@ FodyWeavers.xsd
 
 # Claude
 .claude/
+.gitsync.json

@@ -106,7 +106,7 @@ jobs:
             archive_name: YSMParser-${{ needs.detect-version.outputs.version }}-wasm-web
             binary_relpath: out/install/wasm-web-release/YSMParser.js
             install_dir: out/install/wasm-web-release
-            package_web_frontend: 'true'
+            package_web_frontend: 'false'
           # --- New targets ---
           - os: ubuntu-24.04-arm
             preset: linux-arm64-release
@@ -274,12 +274,6 @@ jobs:
               exit 1
             fi
             cp "$wasm_file" package/
-          fi
-
-          # WASM web: include frontend
-          if [[ "${{ matrix.package_web_frontend }}" == "true" ]]; then
-            cp web/index.html package/
-            cp web/app.js package/
           fi
 
           # Android: compile Java classes and include JAR
