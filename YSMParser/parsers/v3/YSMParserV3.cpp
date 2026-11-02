@@ -1,6 +1,7 @@
 #include "YSMParserV3.hpp"
 #include "../exceptions/ParserException.hpp"
 #include <algorithm>
+#include <charconv>
 #include <cstdint>
 #include <string>
 #include "../YSMParser.hpp"
@@ -134,17 +135,22 @@ std::vector<uint8_t> YSMParserV3::getDecryptedData()
 }
 
 
-static int extractFormatFromHeader(const std::string& headerData) {
+static std::optional<int> extractFormatFromHeader(const std::string& headerData) {
 	size_t pos = headerData.find("<format>");
-	if (pos == std::string::npos) throw std::runtime_error("no <format> label");
+	if (pos == std::string::npos) return std::nullopt;
 	pos += 8;
 	while (pos < headerData.size() && (headerData[pos] == ' ' || headerData[pos] == '\t'))
 		pos++;
-	size_t end = pos;
-	while (end < headerData.size() && headerData[end] >= '0' && headerData[end] <= '9')
-		end++;
-	if (end == pos) throw std::runtime_error("failed to parse <format>");
-	return std::stoi(headerData.substr(pos, end - pos));
+	size_t end = headerData.find_first_of("\r\n", pos);
+	if (end == std::string::npos) end = headerData.size();
+	while (end > pos && (headerData[end - 1] == ' ' || headerData[end - 1] == '\t'))
+		end--;
+	uint32_t format = 0;
+	const auto result = std::from_chars(headerData.data() + pos, headerData.data() + end, format);
+	if (result.ec != std::errc() || result.ptr != headerData.data() + end ||
+		format > static_cast<uint32_t>(std::numeric_limits<int>::max()))
+		throw ParserInvalidFileFormatException();
+	return static_cast<int>(format);
 }
 
 // 数据结构
@@ -2131,7 +2137,7 @@ void YSMParserV3::ParseTextureFiles(BufferReader& reader)
 void YSMParserV3::deserialize(const uint8_t* bufferData, size_t size) {
 	BufferReader reader{ bufferData, size, 0 };
 	uint32_t version = reader.readDword();
-	if (version != m_format) throw new ParserUnSupportVersionException();
+	if (version != static_cast<uint32_t>(m_format)) throw ParserUnSupportVersionException();
 	if (m_format < 4) {
 		deserializeLegacyV1(reader);
 	}
@@ -2724,25 +2730,22 @@ void YSMParserV3::parse()
 	static std::once_flag fpng_init_flag;
 	m_binaryData.clear();
 	auto ip = m_buffer.get();
-	std::string header = ip;
+	// Keep the NUL-terminated header and crypto field before the 64-byte tail.
+	if (m_size < 8 + 24 + 32 + 8) throw ParserInvalidFileFormatException();
+	auto headerLimit = ip + m_size - 64 - sizeof(uint32_t);
+	auto headerEnd = std::find(ip, headerLimit, '\0');
+	if (headerEnd == headerLimit) throw ParserInvalidFileFormatException();
+	std::string header(ip, static_cast<size_t>(headerEnd - ip));
 
 	std::call_once(fpng_init_flag, []() {
 		fpng::fpng_init();
 		});
 
-	// Older V3 files carry a textual <format> header. Newer native V3 files
-	// store the format as the first uint32 of the decrypted payload.
-	try {
-		m_format = extractFormatFromHeader(header);
-	}
-	catch (const std::exception& e) {
-		m_format = 0;
+	// Only a missing tag may fall back to the format in the decrypted payload.
+	const auto headerFormat = extractFormatFromHeader(header);
+	if (!headerFormat) {
 		std::cout << "No textual format header; reading format from payload.\n";
 	}
-
-
-	// Size < mininal_header + len(dyKey + iv + fileHash)
-	if (m_size < 8 + 24 + 32 + 8) throw ParserInvalidFileFormatException();
 
 	// Read Key, IV and FileHash from the end of the file
 	char* ptrFileTail = ip + m_size - 64;
@@ -2775,8 +2778,10 @@ void YSMParserV3::parse()
 
 	// Parse Decrypted Data
 	// First two bytes is Nonce length
+	if (xorred_data.size() < sizeof(uint16_t)) throw ParserInvalidFileFormatException();
 	uint16_t n = static_cast<uint16_t>(xorred_data[0]) | (static_cast<uint16_t>(xorred_data[1]) << 8);
 	n &= 0x3ff;
+	if (n > xorred_data.size() - sizeof(uint16_t)) throw ParserInvalidFileFormatException();
 	// Next Sequence is trueData
 	m_decrypted.assign(xorred_data.begin() + 2 + n, xorred_data.end());
 
@@ -2784,9 +2789,11 @@ void YSMParserV3::parse()
 
 
 	m_decompressed = CryptoUtils::DecompressZstd(m_decrypted);
-	if (m_format == 0 && m_decompressed.size() >= sizeof(uint32_t)) {
-		m_format = readLE<uint32_t>(reinterpret_cast<const char*>(m_decompressed.data()), 0);
-	}
+	if (m_decompressed.size() < sizeof(uint32_t)) throw ParserInvalidFileFormatException();
+	const auto payloadFormat = readLE<uint32_t>(reinterpret_cast<const char*>(m_decompressed.data()), 0);
+	if (payloadFormat > static_cast<uint32_t>(std::numeric_limits<int>::max()))
+		throw ParserUnSupportVersionException();
+	m_format = headerFormat.value_or(static_cast<int>(payloadFormat));
 
 
 	// Start Parse Files
